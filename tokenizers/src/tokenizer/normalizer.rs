@@ -89,6 +89,48 @@ impl NormalizedString {
             .flatten()
     }
 
+    /// Return a range indexed into the normalized string, using a range into the original string (indexing on char not bytes)
+    pub fn get_offset(&self, range: std::ops::Range<usize>) -> Option<std::ops::Range<usize>> {
+        let len = self.original.chars().count();
+        if range.start >= len || range.end > len {
+            None
+        } else {
+            let start = self
+                .alignments
+                .iter()
+                .enumerate()
+                .find(|(_idx, (a, _))| *a == range.start)
+                .map(|s| s.0)?;
+
+            let end = self
+                .alignments
+                .iter()
+                .enumerate()
+                .find(|(_idx, (_, b))| *b == range.end)
+                .map(|s| s.0 + 1)?;
+            Some(start..end)
+        }
+    }
+
+    /// Return a range indexed into the original string, using a range into the normalized string
+    pub fn get_offset_original(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> Option<std::ops::Range<usize>> {
+        self.alignments
+            .get(range)
+            .map(|alignments| {
+                if alignments.is_empty() {
+                    None
+                } else {
+                    let start = alignments[0].0;
+                    let end = alignments[alignments.len() - 1].1;
+                    Some(start..end)
+                }
+            })
+            .flatten()
+    }
+
     /// Applies transformations to the current normalized version, updating the current
     /// alignments with the new ones.
     /// This method expect an Iterator yielding each char of the new normalized string
@@ -429,6 +471,10 @@ mod tests {
             n.get_range_original(0..n.normalized.len()),
             Some("Hello".into())
         );
+        assert_eq!(
+            n.get_offset_original(0..n.normalized.len()),
+            Some(0..n.len_original())
+        );
     }
 
     #[test]
@@ -437,8 +483,16 @@ mod tests {
         n.filter(|c| !c.is_whitespace());
         assert_eq!(n.get_range_original(1.."Hello".len()), Some("ello".into()));
         assert_eq!(
+            n.get_offset_original(1.."Hello".len()),
+            Some(6..n.len_original())
+        );
+        assert_eq!(
             n.get_range_original(0..n.normalized.len()),
             Some("     Hello".into())
+        );
+        assert_eq!(
+            n.get_offset_original(0..n.normalized.len()),
+            Some(0..n.len_original())
         );
     }
 
@@ -447,9 +501,14 @@ mod tests {
         let mut n = NormalizedString::from("Hello    ");
         n.filter(|c| !c.is_whitespace());
         assert_eq!(n.get_range_original(0..4), Some("Hell".into()));
+        assert_eq!(n.get_offset_original(0..4), Some(0..4));
         assert_eq!(
             n.get_range_original(0..n.normalized.len()),
             Some("Hello    ".into())
+        );
+        assert_eq!(
+            n.get_offset_original(0..n.normalized.len()),
+            Some(0..n.len_original())
         );
     }
 
@@ -463,6 +522,30 @@ mod tests {
             n.get_range_original(0.."Hello".len()),
             Some("  Hello  ".into())
         );
+        assert_eq!(
+            n.get_offset_original(0.."Hello".len()),
+            Some(0..n.len_original()),
+        );
+
         assert_eq!(n.get_range_original(1.."Hell".len()), Some("ell".into()));
+        assert_eq!(n.get_offset_original(1.."Hell".len()), Some(3..6));
+    }
+
+    #[test]
+    fn get_offsets() {
+        let mut n = NormalizedString::from("_élég_ant_");
+        n.nfd().filter(|c| *c != '_');
+
+        assert_eq!(n.get_offset(0..n.len_original()), Some(0..n.len()));
+        assert_eq!(n.get_offset_original(0..n.len()), Some(0..n.len_original()));
+
+        assert_eq!(
+            n.get_range_of(&n.normalized, n.get_offset(0..n.len_original()).unwrap()),
+            Some("e\u{301}le\u{301}gant".into()),
+        );
+        assert_eq!(
+            n.get_range_of(&n.original, n.get_offset_original(0..n.len()).unwrap()),
+            Some("_élég_ant_".into()),
+        );
     }
 }
